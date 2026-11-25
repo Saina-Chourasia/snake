@@ -8,15 +8,26 @@ let dt = 0;
 let acc = 0;
 let ms = 150;
 
+let scr = "title";
+
 let trn = [];
 let dir = { x: 1, y: 0 };
 let buf = [];
 
 let pts = 0;
+let best = 0;
+let dist = 0;
+let lastNm = "";
 let pax = null;
 let flash = "";
 let flashAt = 0;
 let rushAt = 0;
+
+let mx = -1;
+let my = -1;
+let hoverId = null;
+let pressId = null;
+let btns = [];
 
 let folks = [
   "Margaret",
@@ -63,13 +74,15 @@ function fit() {
   ox = Math.floor((ww - cols * sz) / 2);
   oy = barH + Math.floor((hh - barH - rows * sz) / 2);
 
-  seed();
+  if (scr !== "crash") seed();
 }
 
 function seed() {
   buf = [];
   dir = { x: 1, y: 0 };
   pts = 0;
+  dist = 0;
+  lastNm = "";
   ms = 150;
   flash = "";
   flashAt = 0;
@@ -130,6 +143,48 @@ function turn(x, y) {
   if (buf.length < 3) buf.push({ x: x, y: y });
 }
 
+function startRun() {
+  seed();
+  acc = 0;
+  lt = performance.now();
+  scr = "game";
+  hoverId = null;
+  pressId = null;
+}
+
+function doPause() {
+  if (scr !== "game") return;
+  scr = "pause";
+  hoverId = null;
+  pressId = null;
+}
+
+function doResume() {
+  if (scr !== "pause") return;
+  acc = 0;
+  lt = performance.now();
+  scr = "game";
+  hoverId = null;
+  pressId = null;
+}
+
+function doRestart() {
+  startRun();
+}
+
+function doQuit() {
+  scr = "title";
+  hoverId = null;
+  pressId = null;
+}
+
+function crash() {
+  if (pts > best) best = pts;
+  scr = "crash";
+  hoverId = null;
+  pressId = null;
+}
+
 function move() {
   if (buf.length) dir = buf.shift();
   if (!pax) spawn();
@@ -138,18 +193,26 @@ function move() {
   let nx = hd.x + dir.x;
   let ny = hd.y + dir.y;
 
-  if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return;
+  if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) {
+    crash();
+    return;
+  }
 
   for (let i = 0; i < trn.length - 1; i++) {
-    if (trn[i].x === nx && trn[i].y === ny) return;
+    if (trn[i].x === nx && trn[i].y === ny) {
+      crash();
+      return;
+    }
   }
 
   let got = pax && pax.x === nx && pax.y === ny;
 
   trn.unshift({ x: nx, y: ny });
+  dist++;
 
   if (got) {
     pts++;
+    lastNm = pax.nm;
     flash = pax.nm + " boarded";
     flashAt = performance.now();
 
@@ -173,9 +236,11 @@ function loop(t) {
 
   acc += dt;
 
-  while (acc >= ms) {
-    move();
-    acc -= ms;
+  if (scr === "game") {
+    while (acc >= ms && scr === "game") {
+      move();
+      acc -= ms;
+    }
   }
 
   paint(t);
@@ -183,6 +248,94 @@ function loop(t) {
 }
 
 function paint(now) {
+  btns = [];
+
+  if (scr === "title") {
+    paintTitle(now);
+  } else if (scr === "game") {
+    paintGame(now);
+  } else if (scr === "pause") {
+    paintGame(now);
+    paintPause(now);
+  } else if (scr === "crash") {
+    paintCrash(now);
+  }
+
+  drawBtns();
+}
+
+function paintTitle(now) {
+  cx.fillStyle = "#f4e4c1";
+  cx.fillRect(0, 0, ww, hh);
+
+  mapDoodle();
+
+  let lg = ww < 768 ? 44 : 76;
+  let ty = hh * 0.24;
+
+  cx.textAlign = "center";
+  cx.textBaseline = "middle";
+
+  cx.font = "900 " + lg + "px ui-monospace, monospace";
+
+  cx.fillStyle = "rgba(209,58,42,.55)";
+  cx.fillText("SNAKE", ww / 2 + 3, ty + 3);
+
+  cx.fillStyle = "#241d17";
+  cx.fillText("SNAKE", ww / 2, ty);
+
+  cx.font = "600 " + (ww < 768 ? 11 : 13) + "px ui-monospace, monospace";
+  cx.fillStyle = "rgba(36,29,23,.62)";
+  cx.fillText("the last commute", ww / 2, ty + lg * 0.72);
+
+  let bw = Math.min(560, ww * 0.92);
+  let bh = ww < 768 ? 46 : 54;
+  let bx = (ww - bw) / 2;
+  let by = hh * 0.42;
+
+  cx.fillStyle = "#19130d";
+  rrect(bx, by, bw, bh, 8);
+  cx.fill();
+
+  cx.strokeStyle = "#241d17";
+  cx.lineWidth = 2;
+  rrect(bx, by, bw, bh, 8);
+  cx.stroke();
+
+  let msg = "BEST COMMUTE: " + best + " PASSENGERS · 11:47 PM";
+  let fs = ww < 768 ? 13 : 16;
+
+  cx.font = "700 " + fs + "px ui-monospace, monospace";
+
+  while (cx.measureText(msg).width > bw - 28 && fs > 9) {
+    fs--;
+    cx.font = "700 " + fs + "px ui-monospace, monospace";
+  }
+
+  cx.fillStyle = "#e8a23d";
+  cx.fillText(msg, ww / 2, by + bh / 2 + 1);
+
+  let sw = Math.min(260, ww * 0.72);
+  let sh = 54;
+
+  addBtn(
+    "start",
+    "START",
+    (ww - sw) / 2,
+    hh * 0.58,
+    sw,
+    sh,
+    startRun,
+    true,
+    18,
+  );
+
+  cx.font = "600 " + (ww < 768 ? 11 : 12) + "px ui-monospace, monospace";
+  cx.fillStyle = "rgba(36,29,23,.58)";
+  cx.fillText("ENTER starts · SPACE pauses", ww / 2, hh * 0.58 + sh + 32);
+}
+
+function paintGame(now) {
   cx.fillStyle = "#f4e4c1";
   cx.fillRect(0, 0, ww, hh);
 
@@ -206,6 +359,132 @@ function paint(now) {
   drawTrain();
   hud(now);
   stamp(now);
+
+  if (scr === "game") {
+    let mob = ww < 768;
+    let bw = 40;
+    let bh = mob ? 36 : 30;
+    let bx = ww - bw - 10;
+    let by = (barH - bh) / 2;
+
+    addBtn("pause", "II", bx, by, bw, bh, doPause, false, 12);
+  }
+}
+
+function paintPause(now) {
+  cx.fillStyle = "rgba(22,17,12,.38)";
+  cx.fillRect(0, 0, ww, hh);
+
+  if (trn.length) {
+    let hd = trn[0];
+    let hx = ox + hd.x * sz + sz / 2;
+    let hy = oy + hd.y * sz;
+
+    cx.fillStyle = "#f4e4c1";
+    cx.font = "700 12px ui-monospace, monospace";
+    cx.textAlign = "left";
+    cx.textBaseline = "alphabetic";
+    cx.fillText("zzz", hx + sz * 0.35, hy - sz * 0.18);
+  }
+
+  let cw = Math.min(320, ww * 0.9);
+  let ch = 264;
+  let cxp = (ww - cw) / 2;
+  let cyp = Math.max(60, (hh - ch) / 2);
+
+  panel(cxp, cyp, cw, ch);
+
+  cx.fillStyle = "#241d17";
+  cx.font = "900 24px ui-monospace, monospace";
+  cx.textAlign = "center";
+  cx.textBaseline = "middle";
+  cx.fillText("SERVICE HELD", ww / 2, cyp + 52);
+
+  let bw = Math.min(240, cw - 50);
+  let bx = (ww - bw) / 2;
+  let by = cyp + 92;
+
+  addBtn("resume", "RESUME", bx, by, bw, 44, doResume, false, 14);
+  addBtn("restart", "RESTART", bx, by + 58, bw, 44, doRestart, false, 14);
+  addBtn("quit", "QUIT", bx, by + 116, bw, 44, doQuit, false, 14);
+}
+
+function paintCrash(now) {
+  cx.fillStyle = "#f4e4c1";
+  cx.fillRect(0, 0, ww, hh);
+
+  cx.fillStyle = "rgba(40,30,20,0.05)";
+
+  for (let y = 18; y < hh; y += 26) {
+    cx.fillRect(0, y, ww, 1);
+  }
+
+  let mob = ww < 768;
+  let cw = Math.min(600, ww * 0.94);
+  let ch = mob ? 430 : 390;
+  let x = (ww - cw) / 2;
+  let y = Math.max(40, (hh - ch) / 2);
+
+  panel(x, y, cw, ch);
+
+  cx.textAlign = "center";
+  cx.textBaseline = "middle";
+
+  cx.fillStyle = "#241d17";
+  cx.font = "700 " + (mob ? 11 : 13) + "px ui-monospace, monospace";
+  cx.fillText("TRANSIT AUTHORITY", ww / 2, y + 34);
+
+  cx.fillStyle = "rgba(36,29,23,.28)";
+  cx.fillRect(x + 36, y + 52, cw - 72, 1);
+
+  cx.font = "600 " + (mob ? 14 : 17) + "px ui-monospace, monospace";
+  cx.fillText("We apologize for the disruption", ww / 2, y + 88);
+  cx.fillText("to your evening.", ww / 2, y + 112);
+
+  let sx = x + (mob ? 24 : 56);
+  let sy = y + 162;
+
+  cx.textAlign = "left";
+  cx.font = "700 " + (mob ? 12 : 14) + "px ui-monospace, monospace";
+  cx.fillStyle = "#241d17";
+
+  cx.fillText("PASSENGERS CARRIED  " + pts, sx, sy);
+  cx.fillText("COMMUTE LENGTH  " + dist + " SECTIONS", sx, sy + 28);
+  cx.fillText("CAUSE OF DELAY  DRIVER ERROR", sx, sy + 56);
+  cx.fillText("LAST PASSENGER", sx, sy + 94);
+
+  let nm = lastNm || "no passengers";
+
+  if (mob && nm.length > 18) nm = nm.slice(0, 17) + "...";
+  if (!mob && nm.length > 26) nm = nm.slice(0, 25) + "...";
+
+  let nx = sx + (mob ? 112 : 158);
+
+  cx.fillStyle = "#d13a2a";
+  cx.fillText(nm, nx, sy + 94);
+
+  let tw = cx.measureText(nm).width;
+
+  cx.strokeStyle = "#d13a2a";
+  cx.lineWidth = 2;
+  cx.beginPath();
+  cx.moveTo(nx, sy + 94);
+  cx.lineTo(nx + tw, sy + 94);
+  cx.stroke();
+
+  let bw = Math.min(280, cw * 0.82);
+
+  addBtn(
+    "retry",
+    "RESTORE SERVICE",
+    (ww - bw) / 2,
+    y + ch - 74,
+    bw,
+    48,
+    startRun,
+    true,
+    15,
+  );
 }
 
 function drawPax(now) {
@@ -363,7 +642,7 @@ function hud(now) {
     cx.fillText("SCORE " + pts, 12, 20);
     cx.fillText("PAX " + pts, 12, 46);
 
-    speedo(ww - 88, 20, lvl);
+    speedo(ww - 150, 20, lvl);
 
     if (now - flashAt < 1300 && flash) {
       let msg = flash;
@@ -389,7 +668,7 @@ function hud(now) {
       cx.fillText(msg, ww / 2, barH / 2);
     }
 
-    speedo(ww - 100, barH / 2, lvl);
+    speedo(ww - 190, barH / 2, lvl);
   }
 }
 
@@ -443,6 +722,119 @@ function stamp(now) {
   cx.restore();
 }
 
+function mapDoodle() {
+  cx.save();
+  cx.globalAlpha = 0.16;
+  cx.lineWidth = 4;
+
+  cx.strokeStyle = "#241d17";
+  cx.beginPath();
+  cx.moveTo(ww * 0.08, hh * 0.22);
+  cx.lineTo(ww * 0.32, hh * 0.22);
+  cx.lineTo(ww * 0.46, hh * 0.36);
+  cx.lineTo(ww * 0.72, hh * 0.36);
+  cx.stroke();
+
+  cx.strokeStyle = "#d13a2a";
+  cx.beginPath();
+  cx.moveTo(ww * 0.16, hh * 0.72);
+  cx.lineTo(ww * 0.38, hh * 0.58);
+  cx.lineTo(ww * 0.62, hh * 0.58);
+  cx.lineTo(ww * 0.86, hh * 0.72);
+  cx.stroke();
+
+  cx.fillStyle = "#241d17";
+
+  let a = [
+    [0.08, 0.22],
+    [0.32, 0.22],
+    [0.46, 0.36],
+    [0.72, 0.36],
+    [0.16, 0.72],
+    [0.38, 0.58],
+    [0.62, 0.58],
+    [0.86, 0.72],
+  ];
+
+  for (let i = 0; i < a.length; i++) {
+    cx.beginPath();
+    cx.arc(ww * a[i][0], hh * a[i][1], 4, 0, 6.283);
+    cx.fill();
+  }
+
+  cx.restore();
+}
+
+function panel(x, y, w, h) {
+  cx.fillStyle = "rgba(247,236,216,.97)";
+  cx.strokeStyle = "#241d17";
+  cx.lineWidth = 2;
+
+  rrect(x, y, w, h, 10);
+  cx.fill();
+  cx.stroke();
+}
+
+function addBtn(id, label, x, y, w, h, fn, red, fs) {
+  btns.push({
+    id: id,
+    label: label,
+    x: x,
+    y: y,
+    w: w,
+    h: h,
+    fn: fn,
+    red: red,
+    fs: fs,
+  });
+}
+
+function drawBtns() {
+  for (let i = 0; i < btns.length; i++) {
+    drawBtn(btns[i]);
+  }
+}
+
+function drawBtn(b) {
+  let hov = hoverId === b.id;
+  let dn = pressId === b.id;
+  let y = b.y + (dn ? 2 : 0);
+
+  cx.fillStyle = hov ? "rgba(209,58,42,.22)" : "rgba(36,29,23,.12)";
+  rrect(b.x + 3, y + 4, b.w, b.h, 8);
+  cx.fill();
+
+  cx.fillStyle = b.red ? "#d13a2a" : "#f7ecd8";
+  cx.strokeStyle = hov ? "#d13a2a" : "#241d17";
+  cx.lineWidth = 2;
+
+  rrect(b.x, y, b.w, b.h, 8);
+  cx.fill();
+  cx.stroke();
+
+  cx.fillStyle = b.red ? "#f4e4c1" : "#241d17";
+  cx.font = "800 " + (b.fs || 16) + "px ui-monospace, monospace";
+  cx.textAlign = "center";
+  cx.textBaseline = "middle";
+  cx.fillText(b.label, b.x + b.w / 2, y + b.h / 2 + 1);
+}
+
+function findBtn(x, y) {
+  for (let i = btns.length - 1; i >= 0; i--) {
+    let b = btns[i];
+
+    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+  }
+
+  return null;
+}
+
+function ptr(e) {
+  let r = cv.getBoundingClientRect();
+  mx = e.clientX - r.left;
+  my = e.clientY - r.top;
+}
+
 function rrect(x, y, w, h, r) {
   if (r > w / 2) r = w / 2;
   if (r > h / 2) r = h / 2;
@@ -456,28 +848,84 @@ function rrect(x, y, w, h, r) {
   cx.closePath();
 }
 
-window.addEventListener("keydown", function (e) {
-  let k = e.key.toLowerCase();
+cv.addEventListener("pointermove", function (e) {
+  ptr(e);
 
-  if (k === "arrowup" || k === "w") {
+  let b = findBtn(mx, my);
+
+  hoverId = b ? b.id : null;
+  cv.style.cursor = b ? "pointer" : "default";
+});
+
+cv.addEventListener("pointerdown", function (e) {
+  ptr(e);
+
+  let b = findBtn(mx, my);
+
+  pressId = b ? b.id : null;
+
+  if (b) e.preventDefault();
+});
+
+cv.addEventListener("pointerup", function (e) {
+  ptr(e);
+
+  let b = findBtn(mx, my);
+
+  if (b && pressId === b.id && b.fn) b.fn();
+
+  pressId = null;
+});
+
+cv.addEventListener("pointerleave", function () {
+  mx = -1;
+  my = -1;
+  hoverId = null;
+  pressId = null;
+  cv.style.cursor = "default";
+});
+
+window.addEventListener("keydown", function (e) {
+  let k = e.key;
+
+  if (e.repeat && (k === " " || k === "Enter")) return;
+
+  if (k === "Enter") {
+    if (scr === "title" || scr === "crash") startRun();
+    e.preventDefault();
+    return;
+  }
+
+  if (k === " ") {
+    if (scr === "game") doPause();
+    else if (scr === "pause") doResume();
+    e.preventDefault();
+    return;
+  }
+
+  if (scr !== "game") return;
+
+  let key = k.toLowerCase();
+
+  if (key === "arrowup" || key === "w") {
     turn(0, -1);
     e.preventDefault();
     return;
   }
 
-  if (k === "arrowdown" || k === "s") {
+  if (key === "arrowdown" || key === "s") {
     turn(0, 1);
     e.preventDefault();
     return;
   }
 
-  if (k === "arrowleft" || k === "a") {
+  if (key === "arrowleft" || key === "a") {
     turn(-1, 0);
     e.preventDefault();
     return;
   }
 
-  if (k === "arrowright" || k === "d") {
+  if (key === "arrowright" || key === "d") {
     turn(1, 0);
     e.preventDefault();
     return;
